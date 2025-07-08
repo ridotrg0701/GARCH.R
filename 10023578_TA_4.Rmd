@@ -1,0 +1,116 @@
+---
+title: "10023578_TA_4"
+author: "AK2181-ADW"
+date: "2024-05-18"
+output: html_document
+---
+
+**NAMA : RIDO EVENDI TARIGAN**
+**NIMA : 10023578**
+
+```{r}
+ # Memanggil Data
+library(readr)
+library(tseries)
+library(forecast)
+
+# Memanggil Data
+data <- read_csv("SahamTeo-HargaSaham.csv",col_types = cols(Tanggal = col_date(format = "%m/%d/%Y")))
+plot(data$Tanggal, data$Harga, type = "l", main = "Harga Saham Teo" ,xlab = "Tanggal", ylab = "USD")
+# Membuat garis rataan
+abline(h = mean(data$Harga), lwd = 2, lty = 2, col = "red")
+# Statistik Deskriptif
+summary(data$Harga)
+
+harga <- ts(data$Harga,frequency = 12)
+
+# data yang akan digunakan untuk membuat model
+harga_train <- ts(data$Harga[2:441],frequency = 12)
+
+# data yang akan digunakan untuk memvalidasi model
+harga_validation <-ts(data$Harga[442:883],frequency = 12)
+adf.test(harga_train)
+d_harga_train = diff(harga_train)
+adf.test(d_harga_train)
+ts.plot(d_harga_train,main="Plot Sesuatu Diferensiasi 1 Kali", ylab="Gold",xlab="Tanggal")
+abline(h=mean(d_harga_train),lwd=2,lty=2,col="red")
+acf(ts(d_harga_train,frequency = 1), main="Plot ACF Sesuatu", lag.max=36)
+pacf(ts(d_harga_train,frequency = 1), main="Plot PACF Sesuatu", lag.max=36)
+
+```
+
+
+## UJI DIAGNOSTIK
+
+```{r}
+library(lmtest)
+# for me acf nya tail off jadi ma nya 1
+# ARIMA(1,1,1)
+(mod1_harga = arima(harga_train, order = c(1,1,1)))
+coeftest(mod1_harga)
+accuracy(mod1_harga)
+checkresiduals(mod1_harga)
+```
+
+
+
+## 2. Model Heteroskedastis
+
+```{r}
+library(nortest)
+library(tseries)
+# pilih model ARIMA(1,1,1), ga beda jauh aic nya, parsimoni
+residual_harga= residuals(mod1_harga,standardize=T)
+## QQplot
+set.seed(10120046)
+qqplot(rnorm(n=length(residual_harga)),residual_harga)
+qqline(residual_harga)
+
+## Saphiro Wilk Test
+shapiro.test(residual_harga)
+
+## Anderson Darling Test
+ad.test(residual_harga)
+```
+
+```{r}
+library(FinTS)
+library(forecast)
+resid1_harga = residual_harga^2
+plot(resid1_harga, main = "Grafik Galat Kuadrat", type = 'l')
+
+Box.test(resid1_harga, lag=12)
+ArchTest(residual_harga)
+```
+
+
+## 3. Penentuan Model
+```{r}
+acf(ts(resid1_harga,frequency = 1), main = 'ACF Residu Kuadrat', lag.max = 36)
+
+pacf(ts(resid1_harga,frequency = 1), main = 'PACF Residu Kuadrat', lag.max = 36)
+```
+
+```{r}
+library(rugarch)
+# ARIMA(1,1,1)-GARCH(1,3)
+model1_harga <- ugarchspec(variance.model =list(model="sGARCH", garchOrder=c(1,3)),mean.model = list(armaOrder=c(1,1),arfima = T), # using arfima model
+fixed.pars=list(arfima = 1), # ini unsur I di ARIMA, atau d nya
+distribution.model = "norm")
+val1_harga_fit = ugarchfit(model1_harga, harga_train, solver = "hybrid")
+val1_harga_pred = ugarchforecast(val1_harga_fit, n.ahead = length(harga_validation))
+actual = as.vector(harga_validation)
+ape1_validation <- abs((as.vector(val1_harga_pred@forecast[["seriesFor"]]) - actual)/actual)
+(mape1_validation <- mean(ape1_validation))
+```
+
+```{r}
+library(fGarch)
+m1 <- garchFit(d_harga_train ~ arma(0, 0) + garch(1, 1), data = d_harga_train,
+trace = F)
+summary(m1)
+
+fc_h <- predict(m1, n.ahead = 10, plot = TRUE, conf = 0.95, nx = length(d_harga_train))
+
+fc_h
+```
